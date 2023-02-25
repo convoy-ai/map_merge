@@ -31,7 +31,7 @@ def node():
 
     world_map_topic = rospy.get_param('~world_map_topic', '/map')
     world_map_frame = rospy.get_param('~world_map_frame', 'world')
-    rateHz = rospy.get_param('~rate', 2)
+    rateHz = rospy.get_param('~rate', 0.5)
 
 
     robot_namespaces = ['robot_1', 'robot_2', 'robot_3']

@@ -123,7 +123,6 @@ def calc_world_map_data(world_map, robot_maps, robot_initial_poses):
 
                 world_map_2d = set_grid_value(world_map_2d, world_index, world_cell_value)
                 
-    rospy.loginfo(np.unique(world_map_2d))
     world_map.data = np.resize(world_map_2d, (world_map.info.height * world_map.info.width)).tolist()
 
     return world_map
