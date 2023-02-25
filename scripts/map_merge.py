@@ -31,10 +31,10 @@ def node():
 
     world_map_topic = rospy.get_param('~world_map_topic', '/map')
     world_map_frame = rospy.get_param('~world_map_frame', 'world')
-    rateHz = rospy.get_param('~rate', 1)
+    rateHz = rospy.get_param('~rate', 2)
 
 
-    robot_namespaces = ['robot_1', 'robot_2']
+    robot_namespaces = ['robot_1', 'robot_2', 'robot_3']
     robot_initial_poses = {}
 
 
@@ -80,16 +80,12 @@ def node():
 
 
     while not rospy.is_shutdown():
-        
-
 
         # calculate world map metadata
         world_map = fn.calc_world_map_metadata(world_map, robot_maps, robot_initial_poses)
 
-        # todo: calculate world map data
-
-        world_map_2d = np.full((world_map.info.height, world_map.info.width), -1, dtype=np.int8)
-        world_map.data = np.resize(world_map_2d, (world_map.info.height * world_map.info.width)).tolist()
+        # calculate world map data
+        world_map = fn.calc_world_map_data(world_map, robot_maps, robot_initial_poses)
 
         # setup world map time
         world_map.header = Header(stamp=rospy.Time.now(), frame_id=world_map_frame)
@@ -99,6 +95,7 @@ def node():
         rospy.loginfo(world_map.info)
         world_map_publisher.publish(world_map)
 
+        # -------------------------------------------
 
         # publish transforms
         transform = TransformStamped()
@@ -112,8 +109,6 @@ def node():
             
             # child frame
             transform.child_frame_id = f'{robot_namespace}/map'
-
-            # todo: calculate based on world map origin
 
             # translation and rotation
             transform.transform.translation = Vector3(x=initial_pose['x'], y=initial_pose['y'], z=0)
