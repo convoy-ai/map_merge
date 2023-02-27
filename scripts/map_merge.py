@@ -19,6 +19,7 @@ robot_maps = {} # dict of OccupancyGrid
 def create_map_callback(namespace):
     def map_callback(data):
         global robot_maps
+        rospy.loginfo(f"Received robot map: {namespace}")
         robot_maps[namespace] = data
 
     return map_callback
@@ -69,9 +70,7 @@ def node():
     
     # wait for all robot maps
     while len(robot_maps.keys()) != len(robot_namespaces):
-        rospy.spin()
         rospy.sleep(0.1)
-
 
 
     # ------------------------------------------------
