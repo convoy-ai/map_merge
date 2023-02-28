@@ -130,7 +130,12 @@ def calc_world_map_data(world_map, robot_maps, robot_initial_poses):
 
 def cell_value_to_odds(v):
     p = v / 100
-    p = 0.99 if 1 - p < 0.01 else p
+
+    if p < 0.01:
+        p = 0.01
+    elif p > 0.996:
+        p = 0.996
+
     return p / (1 - p)
 
 
