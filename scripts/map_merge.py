@@ -91,6 +91,7 @@ def node():
 
 
     while not rospy.is_shutdown():
+        loop_start_time = rospy.Time.now().to_sec()
 
         # calculate world map metadata
         world_map = fn.calc_world_map_metadata(world_map, robot_maps, robot_initial_poses)
@@ -129,7 +130,8 @@ def node():
             tf_broadcaster.sendTransform(transform)
 
 
-
+        loop_end_time = rospy.Time.now().to_sec() - loop_start_time
+        rospy.loginfo(f"Map merge took {loop_end_time:.3f}s")
 
 
         # --------------------------------------------
