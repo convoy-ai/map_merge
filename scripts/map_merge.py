@@ -19,7 +19,7 @@ robot_maps = {} # dict of OccupancyGrid
 def create_map_callback(namespace):
     def map_callback(data):
         global robot_maps
-        rospy.loginfo(f"Received robot map: {namespace}")
+        rospy.logdebug(f"Received robot map: {namespace}")
         robot_maps[namespace] = data
 
     return map_callback
@@ -32,10 +32,11 @@ def node():
 
     world_map_topic = rospy.get_param('~world_map_topic', '/map')
     world_map_frame = rospy.get_param('~world_map_frame', 'world')
-    rateHz = rospy.get_param('~rate', 0.5)
+    rateHz = rospy.get_param('~rate', 0.25)
+    robot_count = int(rospy.get_param('~robot_count', 2))
 
 
-    robot_namespaces = ['robot_1', 'robot_2', 'robot_3']
+    robot_namespaces = [f'robot_{i}' for i in range(1, robot_count + 1)]
     robot_initial_poses = {}
 
 
@@ -45,11 +46,22 @@ def node():
         map_topic = f'{robot_namespace}/map'
         rospy.Subscriber(map_topic, OccupancyGrid, create_map_callback(robot_namespace))
 
-        init_x = rospy.get_param(f'{robot_namespace}/map_merge/init_pose_x', '0.0')
-        init_y = rospy.get_param(f'{robot_namespace}/map_merge/init_pose_y', '0.0')
-        init_yaw = rospy.get_param(f'{robot_namespace}/map_merge/init_pose_yaw', '0.0')
+        params = {
+            'x': f'{robot_namespace}/map_merge/init_pose_x',
+            'y': f'{robot_namespace}/map_merge/init_pose_y',
+            'yaw': f'{robot_namespace}/map_merge/init_pose_yaw',
+        }
+        poses = {}
 
-        robot_initial_poses[robot_namespace] = {'x': init_x, 'y': init_y, 'yaw': init_yaw}
+        for axis, param in params.items():
+
+            if rospy.has_param(param):
+                poses[axis] = rospy.get_param(param) 
+            else:
+                rospy.logwarn(f"Missing mandatory param: {param}")
+                rospy.signal_shutdown(f"Missing mandatory param: {param}")
+
+        robot_initial_poses[robot_namespace] = poses
 
     world_map_publisher = rospy.Publisher(world_map_topic, OccupancyGrid, queue_size=math.ceil(rateHz * 5))
 
@@ -91,7 +103,7 @@ def node():
         world_map.info.map_load_time = rospy.Time.now()
 
         # publish world map
-        rospy.loginfo(world_map.info)
+        rospy.logdebug(world_map.info)
         world_map_publisher.publish(world_map)
 
         # -------------------------------------------
