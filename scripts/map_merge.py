@@ -30,7 +30,7 @@ def node():
 
     rospy.init_node('map_merge', anonymous=False)
 
-    world_map_topic = rospy.get_param('~world_map_topic', '/map')
+    world_map_topic = rospy.get_param('~world_map_topic', 'map')
     world_map_frame = rospy.get_param('~world_map_frame', 'world')
     rateHz = rospy.get_param('~rate', 0.25)
     robot_count = int(rospy.get_param('~robot_count', 2))
@@ -73,7 +73,34 @@ def node():
     world_map.info.width = 100
     world_map.info.height = 150
 
-    tf_broadcaster = tf2_ros.TransformBroadcaster()
+
+    # -----------------------------------------------
+
+    rospy.loginfo("Broadcasting static transforms")
+
+    tf_broadcaster = tf2_ros.StaticTransformBroadcaster()
+    static_transforms = []
+    
+    for robot_namespace in robot_namespaces:
+        initial_pose = robot_initial_poses[robot_namespace]
+
+        transform = TransformStamped()
+
+        # header
+        transform.header.stamp = rospy.Time.now()
+        transform.header.frame_id = world_map_frame
+
+        # child frame
+        transform.child_frame_id = f'{robot_namespace}/map'
+
+        # translation and rotation
+        transform.transform.translation = Vector3(x=initial_pose['x'], y=initial_pose['y'], z=0)
+        q = tf_conversions.transformations.quaternion_from_euler(0, 0, initial_pose['yaw'])
+        transform.transform.rotation = Quaternion(q[0], q[1], q[2], q[3])
+
+        static_transforms.append(transform)
+        
+    tf_broadcaster.sendTransform(static_transforms)
 
     
     # ------------------------------------------------
@@ -108,27 +135,6 @@ def node():
         world_map_publisher.publish(world_map)
 
         # -------------------------------------------
-
-        # publish transforms
-        transform = TransformStamped()
-
-        # shared header
-        transform.header.stamp = rospy.Time.now()
-        transform.header.frame_id = world_map_frame
-
-        for robot_namespace in robot_namespaces:
-            initial_pose = robot_initial_poses[robot_namespace]
-            
-            # child frame
-            transform.child_frame_id = f'{robot_namespace}/map'
-
-            # translation and rotation
-            transform.transform.translation = Vector3(x=initial_pose['x'], y=initial_pose['y'], z=0)
-            q = tf_conversions.transformations.quaternion_from_euler(0, 0, initial_pose['yaw'])
-            transform.transform.rotation = Quaternion(q[0], q[1], q[2], q[3])
-            
-            tf_broadcaster.sendTransform(transform)
-
 
         loop_end_time = rospy.Time.now().to_sec() - loop_start_time
         rospy.loginfo(f"Map merge took {loop_end_time:.3f}s")
