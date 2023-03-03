@@ -16,6 +16,13 @@ import functions as fn
 robot_maps = {} # dict of OccupancyGrid
 
 
+def map_callback(data, args):
+    global robot_maps
+    namespace = args[0]
+    rospy.logdebug(f"Received robot map: {namespace}")
+    robot_maps[namespace] = data
+
+
 def create_map_callback(namespace):
     def map_callback(data):
         global robot_maps
@@ -32,6 +39,7 @@ def node():
 
     world_map_topic = rospy.get_param('~world_map_topic', 'map')
     world_map_frame = rospy.get_param('~world_map_frame', 'world')
+    merge_subprocess_count = int(rospy.get_param('~merge_subprocess_count', 1))
     rateHz = rospy.get_param('~rate', 0.25)
     robot_count = int(rospy.get_param('~robot_count', 2))
 
@@ -44,7 +52,7 @@ def node():
 
     for robot_namespace in robot_namespaces:
         map_topic = f'{robot_namespace}/map'
-        rospy.Subscriber(map_topic, OccupancyGrid, create_map_callback(robot_namespace))
+        rospy.Subscriber(map_topic, OccupancyGrid, callback=map_callback, callback_args=[robot_namespace])
 
         params = {
             'x': f'{robot_namespace}/map_merge/init_pose_x',
@@ -124,7 +132,7 @@ def node():
         world_map = fn.calc_world_map_metadata(world_map, robot_maps, robot_initial_poses)
 
         # calculate world map data
-        world_map = fn.calc_world_map_data(world_map, robot_maps, robot_initial_poses)
+        world_map = fn.calc_world_map_data(world_map, robot_maps, robot_initial_poses, merge_subprocess_count)
 
         # setup world map time
         world_map.header = Header(stamp=rospy.Time.now(), frame_id=world_map_frame)

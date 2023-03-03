@@ -5,6 +5,7 @@ import geometry_msgs
 import numpy as np
 import math
 import typing
+import concurrent.futures
 
 
 
@@ -15,9 +16,9 @@ def calc_world_map_metadata(world_map, robot_maps, robot_initial_poses):
     # calculate width and height
     for robot_namespace, robot_map in robot_maps.items():
 
-        world_map_corners = find_corners(world_map)
+        world_map_corners = find_corners(world_map.info)
         
-        robot_map_corners = find_corners(robot_map)
+        robot_map_corners = find_corners(robot_map.info)
 
         pose = robot_initial_poses[robot_namespace]
         origin_wrt_world = np.array([pose['x'], pose['y']])
@@ -55,43 +56,76 @@ def calc_world_map_metadata(world_map, robot_maps, robot_initial_poses):
 
 
                 # update world map corners so that the next robot map corner can be compared with new information
-                world_map_corners = find_corners(world_map)
+                world_map_corners = find_corners(world_map.info)
 
 
     return world_map
 
 
-def calc_world_map_data(world_map, robot_maps, robot_initial_poses):
+def calc_world_map_data(world_map, robot_maps, robot_initial_poses, process_count = 1):
 
-    # initialize world map data with unknown cells
-    world_map_2d = np.full((world_map.info.height, world_map.info.width), -1, dtype=np.int8)
+    # initialize world map data
+    world_map_2d = None
 
     # setup intermediate values for robot maps to reduce redundant computation
-    intermediate_values = {}
+    robots_dict = {}
 
     for robot_namespace, robot_map in robot_maps.items():
         pose = robot_initial_poses[robot_namespace]
 
-        intermediate_values[robot_namespace] = {
+        robots_dict[robot_namespace] = {
+            'robot_map_info': robot_map.info,
             'data_2d': map_to_2d(robot_map),
-            'corners': find_corners(robot_map),
+            'corners': find_corners(robot_map.info),
             'ba': -1 * np.array([pose['x'], pose['y']]),
             'theta': -1 * pose['yaw']
         }
+    
+    subprocess_args = []
+
+    for i in range(0, process_count):
+        width_count = math.floor(world_map.info.width / process_count)
+        width_start_index = i * width_count
+        if i == process_count - 1:
+            width_count += world_map.info.width % process_count
+
+        args = (world_map.info, robots_dict, width_start_index, width_count)
+        subprocess_args.append(args)
+        rospy.logdebug(f"width_start_index: {width_start_index}; width_count: {width_count}")
+
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        results = executor.map(calc_sub_world_map_data, subprocess_args)
+        
+        for result in results:
+            if world_map_2d is None:
+                world_map_2d = result
+            else:
+                world_map_2d = np.hstack((world_map_2d, result))
+
+    world_map.data = np.resize(world_map_2d, (world_map.info.width * world_map.info.height)).tolist()
+
+    return world_map
 
 
-    # iterate over every world cell in the map
-    for x in range(0, world_map.info.width):
+def calc_sub_world_map_data(args):
+    world_map_info, robots_dict, width_start_index, width_count = args
+    
+    world_map_2d = np.full((world_map_info.height, width_count), -1, dtype=np.int8)
 
-        for y in range(0, world_map.info.height):
+    # iterate over every world cell in the map for the particular width
+    for x in range(0, width_count):
 
-            world_index = [x, y]
-            world_point = index_to_point(world_map, world_index)
+        for y in range(0, world_map_info.height):
+
+            world_map_2d_index = [x, y]
+
+            world_index = [x + width_start_index, y]
+            world_point = index_to_point(world_map_info, world_index)
 
             all_cell_values = []
 
-            for robot_namespace, robot_map in robot_maps.items():
-                intermediate_value = intermediate_values[robot_namespace]
+            for robot_namespace, intermediate_value in robots_dict.items():
+                robot_map_info = intermediate_value['robot_map_info']
                 
                 # a is world (0, 0), b is robot map (0, 0), c is world_point
                 bc = intermediate_value['ba'] + world_point
@@ -99,20 +133,24 @@ def calc_world_map_data(world_map, robot_maps, robot_initial_poses):
 
                 if check_if_inside_corners(intermediate_value['corners'], point_wrt_robot):
 
-                    index_wrt_robot = point_to_index(robot_map, point_wrt_robot)
+                    index_wrt_robot = point_to_index(robot_map_info, point_wrt_robot)
+
+                    if index_wrt_robot[1] >= robot_map_info.height or index_wrt_robot[0] >= robot_map_info.width:
+                        rospy.logwarn(f"Bad index: {index_wrt_robot}; point_wrt_robot: {point_wrt_robot}; world_point: {world_point}; robot: {robot_namespace}; shape: {intermediate_value['data_2d'].shape}")
 
                     cell_value = get_grid_value(intermediate_value['data_2d'], index_wrt_robot)
 
                     if cell_value != -1:
                         all_cell_values.append(cell_value)
-
+            
             if len(all_cell_values) == 0:
                 # all robot maps don't contain this world point
                 continue
 
             elif len(all_cell_values) == 1:
                 # only 1 robot map contains this value, so just inherit it
-                world_map_2d = set_grid_value(world_map_2d, world_index, all_cell_values[0])
+
+                world_map_2d = set_grid_value(world_map_2d, world_map_2d_index, all_cell_values[0])
 
             else:
                 # calculate cell value with probabilistic formula
@@ -121,11 +159,10 @@ def calc_world_map_data(world_map, robot_maps, robot_initial_poses):
                 world_probability = world_odds / (1 + world_odds)
                 world_cell_value = int(round(world_probability * 100))
 
-                world_map_2d = set_grid_value(world_map_2d, world_index, world_cell_value)
-                
-    world_map.data = np.resize(world_map_2d, (world_map.info.height * world_map.info.width)).tolist()
+                world_map_2d = set_grid_value(world_map_2d, world_map_2d_index, world_cell_value)
+    
+    return world_map_2d
 
-    return world_map
 
 
 def cell_value_to_odds(v):
@@ -144,12 +181,12 @@ def rotate_point(point, theta):
     return rotation_matrix @ point
 
 
-def find_corners(map_: nav_msgs.msg.OccupancyGrid):
-    x = map_.info.origin.position.x
-    y = map_.info.origin.position.y
-    res = map_.info.resolution
-    width = map_.info.width
-    height = map_.info.height
+def find_corners(map_info):
+    x = map_info.origin.position.x
+    y = map_info.origin.position.y
+    res = map_info.resolution
+    width = map_info.width
+    height = map_info.height
     
     corners = [
         np.array([x, y]),
@@ -173,10 +210,10 @@ def map_to_2d(mapData):
     return np.resize(np.array(mapData.data), (mapData.info.height, mapData.info.width))
 
 
-def point_to_index(mapData, point):
-    origin_x, origin_y = mapData.info.origin.position.x, mapData.info.origin.position.y
-    resolution = mapData.info.resolution
-    width, height = mapData.info.width, mapData.info.height
+def point_to_index(map_info, point):
+    origin_x, origin_y = map_info.origin.position.x, map_info.origin.position.y
+    resolution = map_info.resolution
+    width, height = map_info.width, map_info.height
 
     x, y = point[0], point[1]
 
@@ -189,9 +226,9 @@ def point_to_index(mapData, point):
     return [index_x, index_y]
 
 
-def index_to_point(mapData, index):
-    origin_x, origin_y = mapData.info.origin.position.x, mapData.info.origin.position.y
-    resolution = mapData.info.resolution
+def index_to_point(map_info, index):
+    origin_x, origin_y = map_info.origin.position.x, map_info.origin.position.y
+    resolution = map_info.resolution
 
     index_x, index_y = index[0], index[1]
 
