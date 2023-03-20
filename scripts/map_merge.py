@@ -23,15 +23,6 @@ def map_callback(data, args):
     robot_maps[namespace] = data
 
 
-def create_map_callback(namespace):
-    def map_callback(data):
-        global robot_maps
-        rospy.logdebug(f"Received robot map: {namespace}")
-        robot_maps[namespace] = data
-
-    return map_callback
-
-
 def node():
     global robot_maps
 
@@ -41,10 +32,11 @@ def node():
     world_map_frame = rospy.get_param('~world_map_frame', 'world')
     merge_subprocess_count = int(rospy.get_param('~merge_subprocess_count', 1))
     rateHz = rospy.get_param('~rate', 0.25)
+    robot_common_name = rospy.get_param('~robot_common_name', 'robot_')
     robot_count = int(rospy.get_param('~robot_count', 2))
 
 
-    robot_namespaces = [f'robot_{i}' for i in range(1, robot_count + 1)]
+    robot_namespaces = [f'{robot_common_name}{i}' for i in range(1, robot_count + 1)]
     robot_initial_poses = {}
 
 
